@@ -15,7 +15,7 @@ export interface VectorStoreTableArgs {
   contentColumn?: string,
   embeddingColumn?: string,
   metadataColumns?: Column[],
-  metadataJsonColumn?: string, 
+  metadataJsonColumn?: string,
   idColumn?: string | Column,
   overwriteExisting?: boolean,
   storeMetadata?: boolean
@@ -46,7 +46,7 @@ export class Column {
   }
 }
 
-const USER_AGENT = "langchain-google-cloud-sql-pg-js";
+const USER_AGENT = "genkit-cloud-sql-pg-js";
 
 export class PostgresEngine {
 
@@ -80,7 +80,7 @@ export class PostgresEngine {
     database: string,
     {
       ipType = IpAddressTypes.PUBLIC,
-      user, 
+      user,
       password,
       iamAccountEmail
     }: PostgresEngineArgs = {}): Promise<PostgresEngine> {
@@ -130,7 +130,7 @@ export class PostgresEngine {
     };
 
     const engine = knex(dbConfig)
-    
+
     return new PostgresEngine(PostgresEngine._createKey, engine)
   }
 
@@ -196,8 +196,8 @@ export class PostgresEngine {
     contentColumn  = "content",
     embeddingColumn = "embedding",
     metadataColumns = [],
-    metadataJsonColumn = "langchain_metadata", 
-    idColumn = "langchain_id",
+    metadataJsonColumn = "json_metadata",
+    idColumn = "id",
     overwriteExisting = false,
     storeMetadata = true
   }: VectorStoreTableArgs = {}): Promise<void> {
@@ -263,5 +263,6 @@ export class PostgresEngine {
     return now;
   }
 }
+
 
 export default PostgresEngine;
