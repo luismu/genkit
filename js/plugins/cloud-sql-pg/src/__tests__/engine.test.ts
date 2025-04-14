@@ -6,7 +6,7 @@ import * as dotenv from "dotenv";
 
 dotenv.config();
 
-const USER_AGENT = "langchain-google-cloud-sql-pg-js";
+const USER_AGENT = "genkit-google-cloud-sql-pg-js";
 const CUSTOM_TABLE = "test_table_custom";
 const CHAT_MSG_TABLE = "test_message_table";
 const VECTOR_SIZE = 768;
@@ -189,7 +189,7 @@ describe('PostgresEngine - table initialization', () => {
     const expected = [
       {'column_name': 'uuid', 'data_type': 'uuid'},
       {'column_name': 'my_embedding', 'data_type': 'USER-DEFINED'},
-      {'column_name': 'langchain_metadata', 'data_type': 'json'},
+      {'column_name': 'json_metadata', 'data_type': 'json'},
       {'column_name': 'my_content', 'data_type': 'text'},
       {'column_name': 'page', 'data_type': 'text'},
       {'column_name': 'source', 'data_type': 'text'},
