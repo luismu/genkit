@@ -1,6 +1,11 @@
 import { Document } from '@genkit-ai/ai/retriever';
 import { EmbedderFn } from '@genkit-ai/ai/embedder';
 import PostgresEngine, { PostgresEngineArgs } from './engine.js';
+import { z } from 'zod';
+
+const embeddingSchema = z.object({
+  embedding: z.array(z.number())
+});
 
 export interface GCloudConnectionParams {
   projectId: string;
@@ -18,12 +23,12 @@ export interface IndexedDocument {
 
 export class GCloudIndexer {
   private engine!: PostgresEngine;
-  private embedder: EmbedderFn<number[]>;
+  private embedder: EmbedderFn<typeof embeddingSchema>;
 
   constructor(
     private config: {
       tableName: string;
-      embedder: EmbedderFn<number[]>;
+      embedder: EmbedderFn<typeof embeddingSchema>;
       connectionParams: GCloudConnectionParams;
     }
   ) {
@@ -40,17 +45,14 @@ export class GCloudIndexer {
     );
   }
 
-
   private async generateEmbeddings(documents: Document[]): Promise<IndexedDocument[]> {
     const embeddings = await Promise.all(
       documents.map(async (doc) => {
-        // Extract text content from the document using the text property
         const content = doc.text;
-        // Create a new Document with the text content for embedding
-        const embedding = await this.embedder([new Document({ content })]);
+        const result = await this.embedder([doc]);
         return {
           content,
-          embedding,
+          embedding: result.embeddings[0].embedding,
           metadata: doc.metadata
         };
       })
@@ -70,7 +72,6 @@ export class GCloudIndexer {
     for (let i = 0; i < vectors.length; i += batchSize) {
       const batch = vectors.slice(i, i + batchSize);
       
-      // Insert documents into the vector store
       await this.engine.pool.table(this.config.tableName).insert(
         batch.map(doc => ({
           content: doc.content,

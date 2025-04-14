@@ -1,11 +1,10 @@
 import { describe, expect, test } from "@jest/globals";
-import PostgresEngine from "../engine.js";
 import { AuthTypes, Connector, IpAddressTypes } from "@google-cloud/cloud-sql-connector";
-import { PostgresEngineArgs, Column, VectorStoreTableArgs } from "../engine.js";
+import { PostgresEngineArgs, Column, VectorStoreTableArgs, PostgresEngine } from "../engine.js";
 import knex from "knex";
 import * as dotenv from "dotenv";
 
-dotenv.config()
+dotenv.config();
 
 const USER_AGENT = "langchain-google-cloud-sql-pg-js";
 const CUSTOM_TABLE = "test_table_custom";
