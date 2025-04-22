@@ -8,7 +8,6 @@ dotenv.config();
 
 const USER_AGENT = "genkit-google-cloud-sql-pg-js";
 const CUSTOM_TABLE = "test_table_custom";
-const CHAT_MSG_TABLE = "test_message_table";
 const VECTOR_SIZE = 768;
 const ID_COLUMN="uuid";
 const CONTENT_COLUMN = "my_content";
@@ -202,27 +201,9 @@ describe('PostgresEngine - table initialization', () => {
     });
   })
 
-  test('should create the chat history table',async () => {
-    await PEInstance.initChatHistoryTable(CHAT_MSG_TABLE);
-
-    const query = `SELECT column_name, data_type FROM information_schema.columns WHERE table_name = '${CHAT_MSG_TABLE}';`
-    const expected = [
-      {'column_name': 'id', 'data_type': 'integer'},
-      {'column_name': 'data', 'data_type': 'jsonb'},
-      {'column_name': 'session_id', 'data_type': 'text'},
-      {'column_name': 'type', 'data_type': 'text'},
-    ]
-
-    const {rows} = await PEInstance.pool.raw(query);
-
-    rows.forEach((row: any, index: number) => {
-      expect(row).toMatchObject(expected[index])
-    });
-  })
 
   afterAll(async () => {
     await PEInstance.pool.raw(`DROP TABLE "${CUSTOM_TABLE}"`)
-    await PEInstance.pool.raw(`DROP TABLE "${CHAT_MSG_TABLE}"`)
 
     try {
       await PEInstance.closeConnection();

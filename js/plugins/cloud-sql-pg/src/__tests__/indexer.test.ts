@@ -1,4 +1,4 @@
-import { GCloudIndexer } from '../indexer.js';
+import { PostgresIndexer } from '../indexer.js';
 import { PostgresEngine, PostgresEngineArgs } from '../engine.js';
 import { Document } from '@genkit-ai/ai/retriever';
 import { EmbedderFn } from '@genkit-ai/ai/embedder';
@@ -18,8 +18,8 @@ const pgArgs: PostgresEngineArgs = {
   password: process.env.PASSWORD ?? ""
 };
 
-describe("GCloudIndexer Integration Tests", () => {
-  let indexer: GCloudIndexer;
+describe("PostgresIndexer Integration Tests", () => {
+  let indexer: PostgresIndexer;
   let PEInstance: PostgresEngine;
 
   // Mock embedder function for testing
@@ -52,7 +52,7 @@ describe("GCloudIndexer Integration Tests", () => {
     `);
 
     // Initialize indexer
-    indexer = new GCloudIndexer({
+    indexer = new PostgresIndexer({
       tableName: TEST_TABLE,
       embedder: mockEmbedder,
       connectionParams: {

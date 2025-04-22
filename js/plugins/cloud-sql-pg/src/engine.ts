@@ -46,7 +46,7 @@ export class Column {
   }
 }
 
-const USER_AGENT = "genkit-cloud-sql-pg-js";
+const USER_AGENT = "genkit-cloud-sql-pg-js";      
 
 export class PostgresEngine {
 
@@ -228,23 +228,6 @@ export class PostgresEngine {
     query += `\n);`
 
     await this.pool.raw(query)
-  }
-
-  /**
-   * Create a Cloud SQL table to store chat history.
-   * 
-   * @param tableName Table name to store chat history
-   * @param schemaName Schema name to store chat history table
-   */
-
-  async initChatHistoryTable(tableName: string, schemaName: string = "public"): Promise<void> {
-    await this.pool.raw(
-      `CREATE TABLE IF NOT EXISTS ${schemaName}.${tableName}(
-      id SERIAL PRIMARY KEY,
-      session_id TEXT NOT NULL,
-      data JSONB NOT NULL,
-      type TEXT NOT NULL);`
-    )
   }
 
   /**

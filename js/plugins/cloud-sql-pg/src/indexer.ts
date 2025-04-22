@@ -21,7 +21,7 @@ export interface IndexedDocument {
   metadata?: Record<string, unknown>;
 }
 
-export class GCloudIndexer {
+export class PostgresIndexer {
   private engine!: PostgresEngine;
   private embedder: EmbedderFn<typeof embeddingSchema>;
 
