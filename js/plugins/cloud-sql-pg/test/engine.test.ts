@@ -1,6 +1,6 @@
-import { describe, expect, test } from "@jest/globals";
+import { describe, expect, test, beforeAll, afterAll  } from "@jest/globals";
 import { AuthTypes, Connector, IpAddressTypes } from "@google-cloud/cloud-sql-connector";
-import { PostgresEngineArgs, Column, VectorStoreTableArgs, PostgresEngine } from "../engine.js";
+import { PostgresEngineArgs, Column, VectorStoreTableArgs, PostgresEngine } from "../src/engine.js";
 import knex from "knex";
 import * as dotenv from "dotenv";
 
