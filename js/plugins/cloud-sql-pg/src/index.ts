@@ -178,6 +178,10 @@ export function configurePostgresIndexer<
     embedderOptions?: z.infer<EmbedderCustomOptions>;
   }
 ) {
+  if (!params.engine) {
+    throw new Error('Engine is required');
+  }
+
   const {
     tableName,
     engine,
@@ -212,6 +216,71 @@ export function configurePostgresIndexer<
     `);
   }
 
+  async function generateEmbeddings(documents: Document[]): Promise<IndexedDocument[]> {
+    const CHUNK_SIZE = 100;
+    const results: IndexedDocument[] = [];
+    
+    for (let i = 0; i < documents.length; i += CHUNK_SIZE) {
+      const chunk = documents.slice(i, i + CHUNK_SIZE);
+      try {
+        const batchEmbeddings = await Promise.all(
+          chunk.map(doc => 
+            ai.embed({
+              embedder,
+              content: { content: doc.content },
+              options: embedderOptions
+            })
+          )
+        );
+        
+        const chunkResults = chunk.map((doc, index) => ({
+          id: doc.metadata?.[idColumn] as string || uuidv4(),
+          content: typeof doc.content === 'string' ? doc.content : JSON.stringify(doc.content),
+          embedding: JSON.stringify(batchEmbeddings[index][0].embedding),
+          metadata: doc.metadata || {}
+        }));
+        
+        results.push(...chunkResults);
+      } catch (error) {
+        throw new Error('Embedding failed');
+      }
+    }
+    
+    return results;
+  }
+
+  async function addDocuments(documents: Document[], options?: { batchSize?: number }) {
+    try {
+      const vectors = await generateEmbeddings(documents);
+      const batchSize = options?.batchSize || 100;
+
+      for (let i = 0; i < vectors.length; i += batchSize) {
+        const batch = vectors.slice(i, i + batchSize);
+        
+        const insertData = batch.map(doc => ({
+          [idColumn]: doc.id,
+          [contentColumn]: doc.content,
+          [embeddingColumn]: doc.embedding,
+          ...(metadataJsonColumn ? { [metadataJsonColumn]: doc.metadata } : {}),
+          ...(metadataColumns.reduce((acc, col) => {
+            if (doc.metadata && doc.metadata[col] !== undefined) {
+              acc[col] = doc.metadata[col];
+            }
+            return acc;
+          }, {} as Record<string, unknown>))
+        }));
+
+        const table = schemaName 
+          ? engine.pool.withSchema(schemaName).table(tableName)
+          : engine.pool.table(tableName);
+
+        await table.insert(insertData);
+      }
+    } catch (error) {
+      throw error;
+    }
+  }
+
   return ai.defineIndexer(
     {
       name: `postgres/${params.tableName}`,
@@ -219,60 +288,14 @@ export function configurePostgresIndexer<
     },
     async (docs, options) => {
       await ensureTableExists();
-
-      // Generate embeddings for all documents
-      const embeddings = await Promise.all(
-        docs.map(doc => 
-          ai.embed({
-            embedder,
-            content: { content: doc.content },
-            options: embedderOptions
-          })
-        )
-      );
-
-      // Prepare values for batch insert
-      const values = docs.map((doc, i) => {
-        const docEmbeddings = embeddings[i];
-        const metadata = doc.metadata || {};
-        
-        return {
-          id: metadata[idColumn] || uuidv4(),
-          content: doc.content,
-          embedding: JSON.stringify(docEmbeddings[0].embedding),
-          metadata,
-          ...metadata
-        };
-      });
-
-      const columns = [
-        idColumn,
-        contentColumn,
-        embeddingColumn,
-        ...(metadataJsonColumn ? [metadataJsonColumn] : []),
-        ...metadataColumns
-      ];
-
-      const insertQuery = `
-        INSERT INTO ${schemaName}.${tableName} (${columns.join(', ')})
-        VALUES ${values.map((_, i) => 
-          `(${columns.map((_, j) => `$${i * columns.length + j + 1}`).join(', ')})`
-        ).join(', ')}
-        ON CONFLICT (${idColumn}) DO UPDATE SET
-          ${contentColumn} = EXCLUDED.${contentColumn},
-          ${embeddingColumn} = EXCLUDED.${embeddingColumn}
-          ${metadataJsonColumn ? `, ${metadataJsonColumn} = EXCLUDED.${metadataJsonColumn}` : ''}
-      `;
-
-      const flatValues = values.flatMap(value => [
-        value.id,
-        value.content,
-        value.embedding,
-        ...(metadataJsonColumn ? [JSON.stringify(value.metadata)] : []),
-        ...metadataColumns.map(col => value[col] || null)
-      ]);
-
-      await engine.pool.raw(insertQuery, flatValues);
+      await addDocuments(docs, options);
     }
   );
+}
+
+interface IndexedDocument {
+  id: string;
+  content: string;
+  embedding: string;
+  metadata: Record<string, unknown>;
 }
