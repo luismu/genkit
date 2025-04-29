@@ -1,29 +1,12 @@
-/**
- * Copyright 2025 Google LLC
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 import { Genkit, z } from 'genkit';
-import { defineAction } from '@genkit-ai/core';
+import { GenkitPlugin, genkitPlugin } from 'genkit/plugin';
+import { EmbedderArgument, Embedding } from 'genkit/embedder';
 import {
   CommonRetrieverOptionsSchema,
+  Document,
   indexerRef,
   retrieverRef,
-  Document
 } from 'genkit/retriever';
-import { GenkitPlugin, genkitPlugin } from 'genkit/plugin';
-import { EmbedderArgument } from 'genkit/embedder';
 
 import { v4 as uuidv4 } from 'uuid';
 import { PostgresEngine } from './engine';
@@ -33,7 +16,8 @@ const PostgresRetrieverOptionsSchema = CommonRetrieverOptionsSchema.extend({
   filter: z.record(z.string(), z.any()).optional(),
 });
 
-const PostgresIndexerOptionsSchema = z.object({});
+const PostgresIndexerOptionsSchema = z.object({
+});
 
 /**
  * postgresRetrieverRef function creates a retriever for Postgres.
@@ -73,199 +57,206 @@ export const postgresIndexerRef = (params: {
   });
 };
 
-// Types
-type PostgresIndexerConfig<EmbedderCustomOptions extends z.ZodTypeAny> = {
-  tableName: string;
-  embedder: EmbedderArgument<EmbedderCustomOptions>;
-  embedderOptions?: z.infer<EmbedderCustomOptions>;
-  engine: PostgresEngine;
-};
+/**
+ * Postgres plugin that provides a Postgres retriever and indexer
+ * @param params An array of params to set up Postgres retrievers and indexers
+ * @param params.tableName The name of the table
+ * @param params.embedder The embedder to use for the indexer and retriever
+ * @param params.embedderOptions  Options to customize the embedder
+ * @returns The Postgres Genkit plugin
+ */
+export function postgres<EmbedderCustomOptions extends z.ZodTypeAny>(
+  params: {
+    tableName: string,
+    embedder: EmbedderArgument<EmbedderCustomOptions>;
+    embedderOptions?: z.infer<EmbedderCustomOptions>;
+    engine: PostgresEngine;
+    schemaName?: string;
+    contentColumn: string;
+    embeddingColumn: string;
+    metadataColumns?: string[];
+    idColumn: string;
+    metadataJsonColumn?: string;
+    distanceStrategy: 'cosine' | 'ip' | 'l2';
+  }[]
+): GenkitPlugin {
+  return genkitPlugin('postgres', async (ai: Genkit) => {
+    params.map((i) => configurePostgresRetriever(ai, i));
+    params.map((i) => configurePostgresIndexer(ai, i));
+  });
+}
 
-type IndexedDocument = {
-  content: string;
-  embedding: number[];
-  metadata: Record<string, any>;
-};
-
-// Constants
-const CHUNK_SIZE = 100;
-const DEFAULT_SCHEMA = 'public';
-const DEFAULT_CONTENT_COLUMN = 'content';
-const DEFAULT_EMBEDDING_COLUMN = 'embedding';
-const DEFAULT_ID_COLUMN = 'id';
-const DEFAULT_DISTANCE_STRATEGY = 'cosine';
+export default postgres;
 
 /**
- * Configures a Postgres indexer with the given parameters
+ * Configures a Postgres retriever.
+ * @param ai A Genkit instance
+ * @param params The params for the retriever
+ * @param params.tableName The name of the table
+ * @param params.embedder The embedder to use for the retriever
+ * @param params.embedderOptions  Options to customize the embedder
+ * @returns A Postgres retriever
  */
-function configurePostgresIndexer<EmbedderCustomOptions extends z.ZodTypeAny>(
+export function configurePostgresRetriever<
+  EmbedderCustomOptions extends z.ZodTypeAny,
+>(
   ai: Genkit,
-  params: PostgresIndexerConfig<EmbedderCustomOptions> & {
-    schemaName?: string;
-    contentColumn?: string;
-    embeddingColumn?: string;
-    metadataColumns?: string[];
-    idColumn?: string;
-    metadataJsonColumn?: string;
-    distanceStrategy?: 'cosine' | 'ip' | 'l2';
+  params: {
+    tableName: string;
+    embedder: EmbedderArgument<EmbedderCustomOptions>;
+    embedderOptions?: z.infer<EmbedderCustomOptions>;
   }
 ) {
-  const {
-    tableName,
-    engine,
-    schemaName = DEFAULT_SCHEMA,
-    contentColumn = DEFAULT_CONTENT_COLUMN,
-    embeddingColumn = DEFAULT_EMBEDDING_COLUMN,
-    metadataColumns = [],
-    idColumn = DEFAULT_ID_COLUMN,
-    metadataJsonColumn,
-    distanceStrategy = DEFAULT_DISTANCE_STRATEGY,
-    embedder: embedderName = 'text-embedding-004'
-  } = params;
 
-  /**
-   * Generates embeddings for a batch of documents
-   */
-  async function generateEmbeddings(documents: Document[]): Promise<IndexedDocument[]> {
-    const results: IndexedDocument[] = [];
-
-    for (let i = 0; i < documents.length; i += CHUNK_SIZE) {
-      const chunk = documents.slice(i, i + CHUNK_SIZE);
-      const batchDocuments = chunk.map(doc => new Document({ content: doc.content }));
-
-      let batchEmbeddings: number[][] = [];
-
-      if (typeof embedderName === 'function') {
-        batchEmbeddings = await Promise.all(
-          batchDocuments.map(doc => 
-            (embedderName as unknown as (input: { input: { content: { text: string }[] }[] }) => Promise<{ embedding: number[] }[]>)({ 
-              input: [{ content: [{ text: String(doc.content) }] }] 
-            }).then(result => result[0]?.embedding || [])
-          )
-        );
-      } else {
-        const embedResult = await ai.embed({
-          embedder: embedderName,
-          content: batchDocuments.map(doc => String(doc.content)).join(' '),
-        });
-        batchEmbeddings = embedResult.map(r => r.embedding);
-      }
-
-      const chunkResults = chunk.map((doc, index) => ({
-        content: String(doc.content),
-        embedding: batchEmbeddings[index],
-        metadata: doc.metadata || {},
-      }));
-
-      results.push(...chunkResults);
-    }
-
-    return results;
-  }
-
-  /**
-   * Adds documents to the index
-   */
-  async function addDocuments(
-    documents: Document[],
-    options?: { ids?: string[]; batchSize?: number }
-  ) {
-    if (!engine) {
-      throw new Error('Indexer not initialized. Call initialize() first.');
-    }
-
-    const vectors = await generateEmbeddings(documents);
-    const batchSize = options?.batchSize || CHUNK_SIZE;
-    const ids: string[] = options?.ids || documents.map(doc => 
-      (doc as { id?: string }).id || uuidv4()
-    );
-
-    // Process documents in batches
-    for (let i = 0; i < vectors.length; i += batchSize) {
-      const batch = vectors.slice(i, i + batchSize);
-      const batchIds = ids.slice(i, i + batchSize);
-
-      await engine.pool.raw(
-        `
-        INSERT INTO "${schemaName}"."${tableName}"(
-          "${idColumn}",
-          "${contentColumn}",
-          "${embeddingColumn}",
-          ${metadataColumns.map(col => `"${col}"`).join(', ')}
-          ${metadataJsonColumn ? `, "${metadataJsonColumn}"` : ''}
-        )
-        SELECT * FROM UNNEST (
-          $1::uuid[],
-          $2::text[],
-          $3::vector[],
-          ${metadataColumns.map((_, index) => `$${index + 4}::text[]`).join(', ')}
-          ${metadataJsonColumn ? `, $${metadataColumns.length + 4}::jsonb[]` : ''}
-        ) AS t (
-          "${idColumn}",
-          "${contentColumn}",
-          "${embeddingColumn}",
-          ${metadataColumns.map(col => `"${col}"`).join(', ')}
-          ${metadataJsonColumn ? `, "${metadataJsonColumn}"` : ''}
-        )
-        `,
-        [
-          batchIds,
-          batch.map(doc => doc.content),
-          batch.map(doc => doc.embedding),
-          ...metadataColumns.map(col => batch.map(doc => doc.metadata[col] || null)),
-          ...(metadataJsonColumn ? [batch.map(doc => doc.metadata || {})] : []),
-        ]
-      );
-    }
-    return ids;
-  }
-
-  return defineAction(
-    ai.registry,
+  return ai.defineRetriever(
     {
-      name: `postgresIndexer/${tableName}`,
-      actionType: 'indexer',
-      inputSchema: z.array(z.any()),
-      outputSchema: z.object({
-        success: z.boolean(),
-        count: z.number(),
-      }),
-      metadata: {
-        description: 'Postgres vector indexer with pgvector support',
-        config: params,
-      },
+      name: `postgres/${params.tableName}`,
+      configSchema: PostgresRetrieverOptionsSchema,
     },
-    async (documents) => {
-      await addDocuments(documents);
-      return { success: true, count: documents.length };
+    async (content, options) => {
+      // Add logic for handling content and options here
+      console.log(`Retrieving data for table: ${params.tableName}`);
+      return {
+        documents: [], // Return appropriate documents based on your logic
+      };
     }
   );
 }
 
 /**
- * Postgres plugin that provides a Postgres indexer
+ * Configures a Postgres indexer.
+ * @param ai A Genkit instance
+ * @param params The params for the indexer
+ * @param params.tableName The name of the indexer
+ * @param params.engine The engine to use for the indexer
+ * @param params.embedder The embedder to use for the retriever
+ * @param params.embedderOptions  Options to customize the embedder
+ * @param params.metadataColumns The metadata columns to use for the indexer
+ * @param params.idColumn The id column to use for the indexer
+ * @param params.metadataJsonColumn The metadata json column to use for the indexer
+ * @param params.distanceStrategy The distance strategy to use for the indexer
+ * @param params.contentColumn The content column to use for the indexer
+ * @param params.embeddingColumn The embedding column to use for the indexer
+ * @param params.schemaName The schema name to use for the indexer
+ * @param params.chunkSize The chunk size to use for the indexer
+ * @returns Add documents to vector store
+ * 
+ * 
+ * 
  */
-export function postgres<EmbedderCustomOptions extends z.ZodTypeAny>(
-  params: PostgresIndexerConfig<EmbedderCustomOptions>[]
-): GenkitPlugin {
-  return genkitPlugin('postgres', async (ai: Genkit) => {
-    for (const config of params) {
-      configurePostgresIndexer(ai, {
-        ...config,
-        embedder: typeof config.embedder === 'string' 
-          ? config.embedder 
-          : async (content: string) => {
-              if (typeof config.embedder === 'function') {
-                const result = await (config.embedder as unknown as (input: { input: { content: { text: string }[] }[] }) => Promise<{ embedding: number[] }[]>)({ 
-                  input: [{ content: [{ text: content }] }] 
-                });
-                return result[0]?.embedding || [];
-              }
-              return [];
-            },
-      });
-    }
-  });
-}
+export function configurePostgresIndexer<
+  EmbedderCustomOptions extends z.ZodTypeAny,
+>(
+  ai: Genkit,
+  params: {
+    tableName: string;
+    engine: PostgresEngine;
+    schemaName?: string;
+    contentColumn: string;
+    embeddingColumn: string;
+    metadataColumns?: string[];
+    idColumn: string;
+    metadataJsonColumn?: string;
+    distanceStrategy: 'cosine' | 'ip' | 'l2';
+    embedder: EmbedderArgument<EmbedderCustomOptions>;
+    embedderOptions?: z.infer<EmbedderCustomOptions>;
+  }
+) {
+  const {
+    tableName,
+    engine,
+    schemaName = 'public',
+    contentColumn,
+    embeddingColumn,
+    metadataColumns = [],
+    idColumn,
+    metadataJsonColumn,
+    distanceStrategy,
+    embedder,
+    embedderOptions
+  } = params;
 
-export default postgres;
+  async function ensureTableExists() {
+    await engine.pool.raw('CREATE EXTENSION IF NOT EXISTS vector');
+    
+    await engine.pool.raw(`
+      CREATE TABLE IF NOT EXISTS ${schemaName}.${tableName} (
+        ${idColumn} UUID PRIMARY KEY,
+        ${contentColumn} TEXT NOT NULL,
+        ${embeddingColumn} VECTOR(1536),
+        ${metadataJsonColumn ? `${metadataJsonColumn} JSONB,` : ''}
+        ${metadataColumns.map(col => `${col} TEXT,`).join('\n')}
+        created_at TIMESTAMP DEFAULT NOW()
+      );
+      
+      CREATE INDEX IF NOT EXISTS idx_${tableName}_embedding 
+      ON ${schemaName}.${tableName} 
+      USING ivfflat (${embeddingColumn}) 
+      WITH (lists = 100);
+    `);
+  }
+
+  return ai.defineIndexer(
+    {
+      name: `postgres/${params.tableName}`,
+      configSchema: z.object({}).optional(),
+    },
+    async (docs, options) => {
+      await ensureTableExists();
+
+      // Generate embeddings for all documents
+      const embeddings = await Promise.all(
+        docs.map(doc => 
+          ai.embed({
+            embedder,
+            content: { content: doc.content },
+            options: embedderOptions
+          })
+        )
+      );
+
+      // Prepare values for batch insert
+      const values = docs.map((doc, i) => {
+        const docEmbeddings = embeddings[i];
+        const metadata = doc.metadata || {};
+        
+        return {
+          id: metadata[idColumn] || uuidv4(),
+          content: doc.content,
+          embedding: JSON.stringify(docEmbeddings[0].embedding),
+          metadata,
+          ...metadata
+        };
+      });
+
+      const columns = [
+        idColumn,
+        contentColumn,
+        embeddingColumn,
+        ...(metadataJsonColumn ? [metadataJsonColumn] : []),
+        ...metadataColumns
+      ];
+
+      const insertQuery = `
+        INSERT INTO ${schemaName}.${tableName} (${columns.join(', ')})
+        VALUES ${values.map((_, i) => 
+          `(${columns.map((_, j) => `$${i * columns.length + j + 1}`).join(', ')})`
+        ).join(', ')}
+        ON CONFLICT (${idColumn}) DO UPDATE SET
+          ${contentColumn} = EXCLUDED.${contentColumn},
+          ${embeddingColumn} = EXCLUDED.${embeddingColumn}
+          ${metadataJsonColumn ? `, ${metadataJsonColumn} = EXCLUDED.${metadataJsonColumn}` : ''}
+      `;
+
+      const flatValues = values.flatMap(value => [
+        value.id,
+        value.content,
+        value.embedding,
+        ...(metadataJsonColumn ? [JSON.stringify(value.metadata)] : []),
+        ...metadataColumns.map(col => value[col] || null)
+      ]);
+
+      await engine.pool.raw(insertQuery, flatValues);
+    }
+  );
+}
