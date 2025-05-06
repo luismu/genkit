@@ -45,17 +45,17 @@ describe("configurePostgresIndexer Integration Tests", () => {
 
     // Mock Genkit instance
     mockAi = {
-      embed: jest.fn(),
-      defineIndexer: jest.fn().mockImplementation((config, handler) => ({
+      embedMany: () => [{ embedding: [0.1, 0.2, 0.3] }],
+      defineIndexer: () => (config, handler) => ({
         config,
         handler
-      }))
+      })
     } as unknown as Genkit;
 
     // Mock embedder function
     mockEmbedder = {
       name: 'mock-embedder',
-      embed:[{ embedding: [0.1, 0.2, 0.3] }]
+      embedMany: () => [{ embedding: [0.1, 0.2, 0.3] }]
     } as any;
 
     // Create test document
@@ -86,7 +86,7 @@ describe("configurePostgresIndexer Integration Tests", () => {
 
     test('should create table with correct schema on first use', async () => {
       // Execute the handler to trigger table creation
-      await indexer.handler([], {});
+      await indexer({ documents: [], options: {} });
 
       // Verify table exists with correct schema
       const tableInfo = await engine.pool.raw(`
@@ -137,7 +137,7 @@ describe("configurePostgresIndexer Integration Tests", () => {
         })
       );
 
-      await indexer.handler(docs, { batchSize: 2 });
+      await indexer({ documents: docs, options: { batchSize: 2 } });
 
       // Verify all documents were inserted
       const result = await engine.pool
@@ -191,7 +191,7 @@ describe("configurePostgresIndexer Integration Tests", () => {
     test('should handle embedding generation errors', async () => {
       const errorEmbedder = {
         name: 'error-embedder',
-        embed: new Error('Embedding failed')
+        embedMany: () => new Error('Embedding failed')
       } as any;
 
       const indexer = configurePostgresIndexer(mockAi, {
@@ -208,6 +208,12 @@ describe("configurePostgresIndexer Integration Tests", () => {
       await expect(
         indexer({ documents: [new Document({ content: [{ text: 'Fail me' }] })], options: {} })
       ).rejects.toThrow('Embedding failed');
+
+      await indexer({ documents: [testDoc], options: {} });
+
+      await expect(
+        indexer({ documents: [testDoc], options: {} })
+      ).rejects.toThrow();
     });
 
     test('should handle database insertion errors', async () => {

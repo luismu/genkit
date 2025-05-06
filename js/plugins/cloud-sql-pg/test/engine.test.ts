@@ -15,6 +15,23 @@ const EMBEDDING_COLUMN = "my_embedding";
 const METADATA_COLUMNS = [new Column("page", "TEXT"), new Column("source", "TEXT")];
 const STORE_METADATA = true;
 
+const REQUIRED_ENV_VARS = [
+  'PROJECT_ID',
+  'REGION',
+  'INSTANCE_NAME',
+  'DB_NAME',
+  'DB_USER',
+  'DB_PASSWORD',
+  'HOST'
+];
+
+function validateEnvVars() {
+  const missingVars = REQUIRED_ENV_VARS.filter(varName => !process.env[varName]);
+  if (missingVars.length > 0) {
+    throw new Error(`Missing required environment variables: ${missingVars.join(', ')}`);
+  }
+}
+
 describe("PostgresEngine Instance creation", () => {
   let PEInstance: PostgresEngine;
 
@@ -23,6 +40,10 @@ describe("PostgresEngine Instance creation", () => {
     max: 5
   }
 
+  beforeAll(() => {
+    validateEnvVars();
+  });
+
   test('should throw an error if only user or password are passed', async () => {
     const pgArgs: PostgresEngineArgs = {
       user: process.env.DB_USER ?? ""
@@ -30,10 +51,10 @@ describe("PostgresEngine Instance creation", () => {
 
     async function createInstance() {
       PEInstance = await PostgresEngine.fromInstance(
-        process.env.PROJECT_ID ?? "",
-        process.env.REGION ?? "",
-        process.env.INSTANCE_NAME ?? "",
-        process.env.DB_NAME ?? "",
+        process.env.PROJECT_ID!,
+        process.env.REGION!,
+        process.env.INSTANCE_NAME!,
+        process.env.DB_NAME!,
         pgArgs
       );
     }
@@ -47,15 +68,15 @@ describe("PostgresEngine Instance creation", () => {
 
   test('should create a PostgresEngine Instance using user and password', async () => {
     const pgArgs: PostgresEngineArgs = {
-      user: process.env.DB_USER ?? "",
-      password: process.env.PASSWORD ?? ""
+      user: process.env.DB_USER!,
+      password: process.env.DB_PASSWORD!
     }
 
     PEInstance = await PostgresEngine.fromInstance(
-      process.env.PROJECT_ID ?? "",
-      process.env.REGION ?? "",
-      process.env.INSTANCE_NAME ?? "",
-      process.env.DB_NAME ?? "",
+      process.env.PROJECT_ID!,
+      process.env.REGION!,
+      process.env.INSTANCE_NAME!,
+      process.env.DB_NAME!,
       pgArgs
     );
 
@@ -107,7 +128,7 @@ describe("PostgresEngine Instance creation", () => {
       client: 'pg',
       connection: {
         ...clientOpts,
-        password: process.env.PASSWORD,
+        password: process.env.DB_PASSWORD,
         user: process.env.DB_USER,
         database: process.env.DB_NAME,
       },
@@ -138,7 +159,7 @@ describe("PostgresEngine Instance creation", () => {
   });
 
   test('should create a PostgresEngine Instance through from_engine_args using a URL', async () => {
-    const url = `postgresql+asyncpg://${process.env.DB_USER}:${process.env.PASSWORD}@${process.env.HOST}:5432/${process.env.DB_NAME}`
+    const url = `postgresql+asyncpg://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.HOST}:5432/${process.env.DB_NAME}`
 
     PEInstance = await PostgresEngine.fromEngineArgs(url, poolConfig);
 
@@ -160,7 +181,7 @@ describe('PostgresEngine - table initialization', () => {
   beforeAll(async () => {
     const pgArgs: PostgresEngineArgs = {
       user: process.env.DB_USER ?? "",
-      password: process.env.PASSWORD ?? ""
+      password: process.env.DB_PASSWORD ?? ""
     }
 
     PEInstance = await PostgresEngine.fromInstance(

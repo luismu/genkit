@@ -25,7 +25,7 @@ import {
 } from 'genkit/retriever';
 
 import { v4 as uuidv4 } from 'uuid';
-import { PostgresEngine } from './engine';
+import { PostgresEngine, Column } from './engine';
 
 const PostgresRetrieverOptionsSchema = CommonRetrieverOptionsSchema.extend({
   k: z.number().max(1000),
@@ -33,6 +33,7 @@ const PostgresRetrieverOptionsSchema = CommonRetrieverOptionsSchema.extend({
 });
 
 const PostgresIndexerOptionsSchema = z.object({
+  batchSize: z.number().default(100),
 });
 
 /**
@@ -88,12 +89,12 @@ export function postgres<EmbedderCustomOptions extends z.ZodTypeAny>(
     embedderOptions?: z.infer<EmbedderCustomOptions>;
     engine: PostgresEngine;
     schemaName?: string;
-    contentColumn: string;
-    embeddingColumn: string;
+    contentColumn?: string;
+    embeddingColumn?: string;
     metadataColumns?: string[];
-    idColumn: string;
+    idColumn?: string;
     metadataJsonColumn?: string;
-    distanceStrategy: 'cosine' | 'ip' | 'l2';
+    distanceStrategy?: 'cosine' | 'ip' | 'l2';
   }[]
 ): GenkitPlugin {
   return genkitPlugin('postgres', async (ai: Genkit) => {
@@ -156,9 +157,6 @@ export function configurePostgresRetriever<
  * @param params.schemaName The schema name to use for the indexer
  * @param params.chunkSize The chunk size to use for the indexer
  * @returns Add documents to vector store
- * 
- * 
- * 
  */
 export function configurePostgresIndexer<
   EmbedderCustomOptions extends z.ZodTypeAny,
@@ -168,12 +166,12 @@ export function configurePostgresIndexer<
     tableName: string;
     engine: PostgresEngine;
     schemaName?: string;
-    contentColumn: string;
-    embeddingColumn: string;
+    contentColumn?: string;
+    embeddingColumn?: string;
     metadataColumns?: string[];
-    idColumn: string;
+    idColumn?: string;
     metadataJsonColumn?: string;
-    distanceStrategy: 'cosine' | 'ip' | 'l2';
+    distanceStrategy?: 'cosine' | 'ip' | 'l2';
     embedder: EmbedderArgument<EmbedderCustomOptions>;
     embedderOptions?: z.infer<EmbedderCustomOptions>;
   }
@@ -186,57 +184,53 @@ export function configurePostgresIndexer<
     tableName,
     engine,
     schemaName = 'public',
-    contentColumn,
-    embeddingColumn,
+    contentColumn = 'content',
+    embeddingColumn = 'embedding',
     metadataColumns = [],
-    idColumn,
+    idColumn = 'id',
     metadataJsonColumn,
-    distanceStrategy,
+    distanceStrategy = 'cosine',
     embedder,
     embedderOptions
   } = params;
 
   async function ensureTableExists() {
-    await engine.pool.raw('CREATE EXTENSION IF NOT EXISTS vector');
-    
-    await engine.pool.raw(`
-      CREATE TABLE IF NOT EXISTS ${schemaName}.${tableName} (
-        ${idColumn} UUID PRIMARY KEY,
-        ${contentColumn} TEXT NOT NULL,
-        ${embeddingColumn} VECTOR(1536),
-        ${metadataJsonColumn ? `${metadataJsonColumn} JSONB,` : ''}
-        ${metadataColumns.map(col => `${col} TEXT,`).join('\n')}
-        created_at TIMESTAMP DEFAULT NOW()
-      );
-      
-      CREATE INDEX IF NOT EXISTS idx_${tableName}_embedding 
-      ON ${schemaName}.${tableName} 
-      USING ivfflat (${embeddingColumn}) 
-      WITH (lists = 100);
-    `);
+    await engine.initVectorstoreTable(tableName, 1536, {
+      schemaName,
+      contentColumn,
+      embeddingColumn,
+      metadataColumns: metadataColumns.map(col => new Column(col, 'TEXT')),
+      metadataJsonColumn,
+      idColumn,
+      overwriteExisting: false,
+      storeMetadata: true
+    });
   }
 
-  async function generateEmbeddings(documents: Document[]): Promise<IndexedDocument[]> {
-    const CHUNK_SIZE = 100;
+  async function generateEmbeddings(documents: Document[], options?: { batchSize?: number }): Promise<IndexedDocument[]> {
+    const CHUNK_SIZE = options?.batchSize || 100;
     const results: IndexedDocument[] = [];
     
     for (let i = 0; i < documents.length; i += CHUNK_SIZE) {
-      const chunk = documents.slice(i, i + CHUNK_SIZE);
+      const chunk = documents.slice(i, i + CHUNK_SIZE).map(doc => {
+        const textContent = doc.content
+          .filter(part => part.text)
+          .map(part => part.text)
+          .join(' ');
+        return Document.fromText(textContent, doc.metadata);
+      });
       try {
-        const batchEmbeddings = await Promise.all(
-          chunk.map(doc => 
-            ai.embed({
-              embedder,
-              content: { content: doc.content },
-              options: embedderOptions
-            })
-          )
-        );
+        // Single batch call for all documents in the chunk
+        const batchEmbeddings = await ai.embedMany({
+          embedder,
+          content: chunk,
+          options: embedderOptions
+        });
         
         const chunkResults = chunk.map((doc, index) => ({
           id: doc.metadata?.[idColumn] as string || uuidv4(),
           content: typeof doc.content === 'string' ? doc.content : JSON.stringify(doc.content),
-          embedding: JSON.stringify(batchEmbeddings[index][0].embedding),
+          embedding: JSON.stringify(batchEmbeddings[index].embedding),
           metadata: doc.metadata || {}
         }));
         
@@ -249,46 +243,45 @@ export function configurePostgresIndexer<
     return results;
   }
 
-  async function addDocuments(documents: Document[], options?: { batchSize?: number }) {
-    try {
-      const vectors = await generateEmbeddings(documents);
-      const batchSize = options?.batchSize || 100;
-
-      for (let i = 0; i < vectors.length; i += batchSize) {
-        const batch = vectors.slice(i, i + batchSize);
-        
-        const insertData = batch.map(doc => ({
-          [idColumn]: doc.id,
-          [contentColumn]: doc.content,
-          [embeddingColumn]: doc.embedding,
-          ...(metadataJsonColumn ? { [metadataJsonColumn]: doc.metadata } : {}),
-          ...(metadataColumns.reduce((acc, col) => {
-            if (doc.metadata && doc.metadata[col] !== undefined) {
-              acc[col] = doc.metadata[col];
-            }
-            return acc;
-          }, {} as Record<string, unknown>))
-        }));
-
-        const table = schemaName 
-          ? engine.pool.withSchema(schemaName).table(tableName)
-          : engine.pool.table(tableName);
-
-        await table.insert(insertData);
-      }
-    } catch (error) {
-      throw error;
-    }
-  }
-
   return ai.defineIndexer(
     {
       name: `postgres/${params.tableName}`,
-      configSchema: z.object({}).optional(),
+      configSchema: PostgresIndexerOptionsSchema.optional(),
     },
     async (docs, options) => {
       await ensureTableExists();
-      await addDocuments(docs, options);
+      
+      try {
+        const vectors = await generateEmbeddings(docs, options);
+        const batchSize = options?.batchSize || 100;
+
+        for (let i = 0; i < vectors.length; i += batchSize) {
+          const batch = vectors.slice(i, i + batchSize);
+          
+          const insertData = batch.map(doc => {
+            const metadata = doc.metadata || {};
+            return {
+              [idColumn]: doc.id,
+              [contentColumn]: doc.content,
+              [embeddingColumn]: doc.embedding,
+              ...(metadataJsonColumn && { [metadataJsonColumn]: metadata }),
+              ...Object.fromEntries(
+                metadataColumns
+                  .filter(col => metadata[col] !== undefined)
+                  .map(col => [col, metadata[col]])
+              )
+            };
+          });
+
+          const table = schemaName 
+            ? engine.pool.withSchema(schemaName).table(tableName)
+            : engine.pool.table(tableName);
+
+          await table.insert(insertData);
+        }
+      } catch (error) {
+        throw error;
+      }
     }
   );
 }

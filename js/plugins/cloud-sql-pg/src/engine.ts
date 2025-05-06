@@ -1,11 +1,11 @@
 import { AuthTypes, Connector, IpAddressTypes} from "@google-cloud/cloud-sql-connector";
 import { GoogleAuth } from "google-auth-library";
 import knex from "knex";
-import { getIAMPrincipalEmail } from "./utils/utils.js";
+import { getIAMPrincipalEmail } from "./utils";
 
 export interface PostgresEngineArgs {
   ipType?: IpAddressTypes,
-  user?: string, 
+  user?: string,
   password?: string,
   iamAccountEmail?: string,
 }
@@ -46,7 +46,7 @@ export class Column {
   }
 }
 
-const USER_AGENT = "genkit-cloud-sql-pg-js";      
+const USER_AGENT = "genkit-cloud-sql-pg-js";
 
 export class PostgresEngine {
 
@@ -136,7 +136,7 @@ export class PostgresEngine {
 
   /**
    * Create a PostgresEngine instance from an Knex instance.
-   * 
+   *
    * @param engine knex instance
    * @returns PostgresEngine instance from a knex instance
    */
@@ -146,7 +146,7 @@ export class PostgresEngine {
 
   /**
    * Create a PostgresEngine instance from arguments.
-   * 
+   *
    * @param url URL use to connect to a database
    * @param poolConfig Optional - Configuration pool to use in the Knex configuration
    * @returns PostgresEngine instance
@@ -176,15 +176,15 @@ export class PostgresEngine {
 
   /**
    * Create a table for saving of vectors to be used with PostgresVectorStore.
-   * 
+   *
    * @param tableName Postgres database table name
    * @param vectorSize Vector size for the embedding model to be used.
    * @param schemaName The schema name to store Postgres database table. Default: "public".
    * @param contentColumn Name of the column to store document content. Default: "content".
    * @param embeddingColumn Name of the column to store vector embeddings. Default: "embedding".
    * @param metadataColumns Optional - A list of Columns to create for custom metadata. Default: [].
-   * @param metadataJsonColumn Optional - The column to store extra metadata in JSON format. Default: "json_metadata". 
-   * @param idColumn Optional - Column to store ids. Default: "id" column name with data type UUID. 
+   * @param metadataJsonColumn Optional - The column to store extra metadata in JSON format. Default: "json_metadata".
+   * @param idColumn Optional - Column to store ids. Default: "id" column name with data type UUID.
    * @param overwriteExisting Whether to drop existing table. Default: False.
    * @param storeMetadata Whether to store metadata in the table. Default: True.
    */
