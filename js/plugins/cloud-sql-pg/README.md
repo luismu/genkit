@@ -7,6 +7,7 @@ npm i --save @genkit-ai/cloud-sql-pg
 ```
 
 ## Using the plugin
+#Indexer usage
 
 ```ts
 import { genkit } from 'genkit';
