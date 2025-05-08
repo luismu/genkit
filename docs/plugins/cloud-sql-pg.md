@@ -23,6 +23,21 @@ const engine = await PostgresEngine.fromEngineArgs({
   database: 'mydb',
   port: 5432
 });
+
+// Create the vector store table
+await engine.initVectorstoreTable('my-documents', 1536, {
+  schemaName: 'public',
+  contentColumn: 'content',
+  embeddingColumn: 'embedding',
+  idColumn: 'custom_id', // Custom ID column name
+  metadataColumns: [
+    { name: 'source', dataType: 'TEXT' },
+    { name: 'category', dataType: 'TEXT' }
+  ],
+  metadataJsonColumn: 'metadata',
+  storeMetadata: true,
+  overwriteExisting: true
+});
 ```
 
 Then, specify the plugin when you initialize Genkit:
@@ -37,19 +52,53 @@ const ai = genkit({
     postgres([
       {
         tableName: 'my-documents',
-        engine: engine, // Use the PostgresEngine instance
+        engine: engine,
         embedder: textEmbedding004,
         schemaName: 'public', 
         contentColumn: 'content',
         embeddingColumn: 'embedding',
+        idColumn: 'custom_id', // Match the ID column from table creation
         metadataColumns: ['source', 'category'],
         ignoreMetadataColumns: ['created_at', 'updated_at'],
-        idColumn: 'id',
         metadataJsonColumn: 'metadata',
-        distanceStrategy: 'cosine',
       },
     ]),
   ],
+});
+
+// To use the table you configured when you loaded the plugin:
+await ai.index({ 
+  indexer: postgresIndexerRef({ 
+    tableName: 'my-documents',
+    engine: engine
+  }), 
+  documents: [
+    {
+      content: [{ text: "The product features include..." }],
+      metadata: {
+        source: "website",
+        category: "product-docs",
+        custom_id: "doc-123" // This will be used as the document ID
+      }
+    }
+  ]
+});
+
+// To retrieve from the configured table:
+const query = "What are the key features of the product?";
+let docs = await ai.retrieve({ 
+  retriever: postgresRetrieverRef({ 
+    tableName: 'my-documents',
+    engine: engine
+  }), 
+  query,
+  options: {
+    k: 5,
+    filter: {
+      category: 'product-docs',
+      source: 'website'
+    }
+  }
 });
 ```
 
@@ -69,47 +118,93 @@ Import retriever and indexer references like so:
 import { postgresRetrieverRef, postgresIndexerRef } from '@genkit-ai/cloud-sql-pg';
 ```
 
-Then, use these references with `ai.retrieve()` and `ai.index()`:
+### Index Documents
+
+You can create reusable references for your indexers:
 
 ```ts
-// To use the table you configured when you loaded the plugin:
-let docs = await ai.retrieve({ retriever: postgresRetrieverRef, query });
-
-// To specify a table:
-export const myDocumentsRetriever = postgresRetrieverRef({
-  tableName: 'my-documents',
-});
-docs = await ai.retrieve({ retriever: myDocumentsRetriever, query });
-```
-
-```ts
-// To use the table you configured when you loaded the plugin:
-await ai.index({ indexer: postgresIndexerRef, documents });
-
-// To specify a table:
 export const myDocumentsIndexer = postgresIndexerRef({
   tableName: 'my-documents',
+  engine: engine
 });
-await ai.index({ indexer: myDocumentsIndexer, documents });
+```
 
-// Index with custom batch size
-await ai.index({ 
-  indexer: myDocumentsIndexer, 
-  documents,
-  options: { batchSize: 10 }
-});
+Then use them to index documents:
 
+```ts
 // Index with custom ID from metadata
 const docWithCustomId = new Document({
   content: [{ text: 'Document with custom ID' }],
   metadata: { 
     source: 'test',
-    customId: 'custom-123' // This will be used as the document ID
+    category: 'docs',
+    custom_id: 'custom-123'
   }
 });
+
+await ai.index({
+  indexer: myDocumentsIndexer,
+  documents: [docWithCustomId]
+});
+
+// Index with custom batch size
 await ai.index({ 
   indexer: myDocumentsIndexer, 
-  documents: [docWithCustomId]
+  documents: [
+    {
+      content: [{ text: "The product features include..." }],
+      metadata: {
+        source: "website",
+        category: "product-docs",
+        custom_id: "doc-456"
+      }
+    }
+  ],
+  options: { batchSize: 10 }
+});
+```
+
+### Retrieve Documents
+
+Create reusable references for your retrievers:
+
+```ts
+export const myDocumentsRetriever = postgresRetrieverRef({
+  tableName: 'my-documents',
+  engine: engine
+});
+```
+
+Then use them to retrieve documents:
+
+```ts
+const query = "What are the key features of the product?";
+let docs = await ai.retrieve({ 
+  retriever: myDocumentsRetriever, 
+  query,
+  options: {
+    k: 5, // Number of documents to return
+    filter: { // Optional filter on metadata columns
+      category: 'product-docs',
+      source: 'website'
+    }
+  }
+});
+
+// Or use the reference inline:
+docs = await ai.retrieve({ 
+  retriever: postgresRetrieverRef({ 
+    tableName: 'my-documents',
+    engine: engine
+  }), 
+  query,
+  options: {
+    k: 5,
+    filter: {
+      category: 'product-docs',
+      source: 'website'
+    }
+  }
 });
 ```
 
