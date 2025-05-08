@@ -43,6 +43,17 @@ describe("configurePostgresIndexer Integration Tests", () => {
     await engine.pool.raw(`CREATE SCHEMA IF NOT EXISTS ${SCHEMA_NAME}`);
     await engine.pool.raw(`DROP TABLE IF EXISTS ${SCHEMA_NAME}.${TEST_TABLE}`);
 
+    // Initialize the vectorstore table
+    await engine.initVectorstoreTable(TEST_TABLE, 1536, {
+      schemaName: SCHEMA_NAME,
+      contentColumn: 'content',
+      embeddingColumn: 'embedding',
+      idColumn: 'id',
+      metadataJsonColumn: 'metadata',
+      storeMetadata: true,
+      overwriteExisting: true
+    });
+
     // Mock Genkit instance
     mockAi = {
       embedMany: () => [{ embedding: [0.1, 0.2, 0.3] }],
@@ -73,7 +84,6 @@ describe("configurePostgresIndexer Integration Tests", () => {
       embeddingColumn: 'embedding',
       idColumn: 'id',
       metadataJsonColumn: 'metadata',
-      distanceStrategy: 'cosine',
       embedder: mockEmbedder
     });
   });
@@ -85,7 +95,7 @@ describe("configurePostgresIndexer Integration Tests", () => {
     });
 
     test('should create table with correct schema on first use', async () => {
-      // Execute the handler to trigger table creation
+      // Execute the handler to trigger table validation
       await indexer({ documents: [], options: {} });
 
       // Verify table exists with correct schema
@@ -98,7 +108,7 @@ describe("configurePostgresIndexer Integration Tests", () => {
 
       expect(tableInfo.rows).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ column_name: 'id', data_type: 'uuid' }),
+          expect.objectContaining({ column_name: 'id', data_type: 'text' }),
           expect.objectContaining({ column_name: 'content', data_type: 'text' }),
           expect.objectContaining({ column_name: 'embedding', data_type: 'USER-DEFINED' }),
           expect.objectContaining({ column_name: 'metadata', data_type: 'jsonb' }),
@@ -182,7 +192,6 @@ describe("configurePostgresIndexer Integration Tests", () => {
           contentColumn: 'content',
           embeddingColumn: 'embedding',
           idColumn: 'id',
-          distanceStrategy: 'cosine',
           embedder: mockEmbedder
         });
       }).toThrow();
@@ -201,7 +210,6 @@ describe("configurePostgresIndexer Integration Tests", () => {
         contentColumn: 'content',
         embeddingColumn: 'embedding',
         idColumn: 'id',
-        distanceStrategy: 'cosine',
         embedder: errorEmbedder
       });
 
@@ -217,16 +225,20 @@ describe("configurePostgresIndexer Integration Tests", () => {
     });
 
     test('should handle database insertion errors', async () => {
-      // Create a table with a constraint that will cause our test to fail
+      await engine.initVectorstoreTable('constraint_test', 1536, {
+        schemaName: SCHEMA_NAME,
+        contentColumn: 'content',
+        embeddingColumn: 'embedding',
+        idColumn: 'id',
+        metadataJsonColumn: 'metadata',
+        storeMetadata: true,
+        overwriteExisting: true
+      });
+
+      // Add unique constraint to content column
       await engine.pool.raw(`
-        CREATE TABLE IF NOT EXISTS ${SCHEMA_NAME}.constraint_test (
-          id UUID PRIMARY KEY,
-          content TEXT NOT NULL,
-          embedding VECTOR(1536),
-          metadata JSONB,
-          created_at TIMESTAMP DEFAULT NOW(),
-          CONSTRAINT unique_content UNIQUE (content)
-        );
+        ALTER TABLE ${SCHEMA_NAME}.constraint_test
+        ADD CONSTRAINT unique_content UNIQUE (content);
       `);
 
       const indexer = configurePostgresIndexer(mockAi, {
@@ -237,7 +249,6 @@ describe("configurePostgresIndexer Integration Tests", () => {
         embeddingColumn: 'embedding',
         idColumn: 'id',
         metadataJsonColumn: 'metadata',
-        distanceStrategy: 'cosine',
         embedder: mockEmbedder
       });
 
@@ -253,6 +264,76 @@ describe("configurePostgresIndexer Integration Tests", () => {
       await expect(
         indexer({ documents: [testDoc], options: {} })
       ).rejects.toThrow();
+    });
+
+    test('should throw error when table does not exist', async () => {
+      const nonExistentTable = 'non_existent_table';
+      const indexer = configurePostgresIndexer(mockAi, {
+        tableName: nonExistentTable,
+        engine,
+        schemaName: SCHEMA_NAME,
+        contentColumn: 'content',
+        embeddingColumn: 'embedding',
+        idColumn: 'id',
+        metadataJsonColumn: 'metadata',
+        embedder: mockEmbedder
+      });
+
+      await expect(
+        indexer({ documents: [testDoc], options: {} })
+      ).rejects.toThrow(`Table ${SCHEMA_NAME}.${nonExistentTable} does not exist`);
+    });
+
+    test('should throw error when required columns are missing', async () => {
+      // Create a table with missing required columns
+      await engine.pool.raw(`
+        CREATE TABLE ${SCHEMA_NAME}.invalid_table (
+          id text,
+          metadata jsonb
+        );
+      `);
+
+      const indexer = configurePostgresIndexer(mockAi, {
+        tableName: 'invalid_table',
+        engine,
+        schemaName: SCHEMA_NAME,
+        contentColumn: 'content',
+        embeddingColumn: 'embedding',
+        idColumn: 'id',
+        metadataJsonColumn: 'metadata',
+        embedder: mockEmbedder
+      });
+
+      await expect(
+        indexer({ documents: [testDoc], options: {} })
+      ).rejects.toThrow('Missing required columns: content, embedding');
+    });
+
+    test('should throw error when column types are incorrect', async () => {
+      // Create a table with incorrect column types
+      await engine.pool.raw(`
+        CREATE TABLE ${SCHEMA_NAME}.wrong_types (
+          id integer,
+          content integer,
+          embedding text,
+          metadata jsonb
+        );
+      `);
+
+      const indexer = configurePostgresIndexer(mockAi, {
+        tableName: 'wrong_types',
+        engine,
+        schemaName: SCHEMA_NAME,
+        contentColumn: 'content',
+        embeddingColumn: 'embedding',
+        idColumn: 'id',
+        metadataJsonColumn: 'metadata',
+        embedder: mockEmbedder
+      });
+
+      await expect(
+        indexer({ documents: [testDoc], options: {} })
+      ).rejects.toThrow('Content column must be of type \'text\'');
     });
   });
 

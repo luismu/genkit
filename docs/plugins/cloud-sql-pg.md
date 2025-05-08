@@ -5,48 +5,68 @@ The Cloud SQL for PostgreSQL plugin provides indexer and retriever implementatio
 ## Installation
 
 ```posix-terminal
-npm i --save @genkit-ai/cloud-sql-pg
+npm i --save @genkitx-cloud-sql-pg
 ```
 
 ## Configuration
 
-To use this plugin, specify it when you initialize Genkit:
+To use this plugin, first create a PostgresEngine instance:
+
+```ts
+import { PostgresEngine } from '@genkit-ai/cloud-sql-pg';
+
+// Create PostgresEngine instance
+const engine = await PostgresEngine.fromEngineArgs({
+  user: 'postgres',
+  password: 'password',
+  host: 'localhost',
+  database: 'mydb',
+  port: 5432
+});
+```
+
+Then, specify the plugin when you initialize Genkit:
 
 ```ts
 import { genkit } from 'genkit';
 import { postgres } from '@genkit-ai/cloud-sql-pg';
+import { textEmbedding004 } from '@genkit-ai/vertexai';
 
 const ai = genkit({
   plugins: [
     postgres([
       {
         tableName: 'my-documents',
-        engine: {
-          user: 'postgres',
-          password: 'password',
-          host: 'localhost',
-          database: 'mydb',
-          port: 5432
-        },
+        engine: engine, // Use the PostgresEngine instance
         embedder: textEmbedding004,
+        schemaName: 'public', 
+        contentColumn: 'content',
+        embeddingColumn: 'embedding',
+        metadataColumns: ['source', 'category'],
+        ignoreMetadataColumns: ['created_at', 'updated_at'],
+        idColumn: 'id',
+        metadataJsonColumn: 'metadata',
+        distanceStrategy: 'cosine',
       },
     ]),
   ],
 });
 ```
 
-You must specify:
-- A table name for storing the documents
-- PostgreSQL connection details in the `engine` object
-- The embedding model you want to use
+The plugin validates the following when initializing:
+- Required columns exist (id, content, embedding)
+- Content column is a text type
+- Embedding column is a vector type
+- Metadata columns exist (if specified)
+- Cannot use both metadataColumns and ignoreMetadataColumns
+- If ignoreMetadataColumns is used, it will use all remaining columns as metadata
 
 ## Usage
 
 Import retriever and indexer references like so:
 
 ```ts
-import { postgresRetrieverRef } from '@genkit-ai/cloud-sql-pg';
-import { postgresIndexerRef } from '@genkit-ai/cloud-sql-pg';
+import { postgresRetrieverRef, postgresIndexerRef } from '@genkit-ai/cloud-sql-pg';
 ```
 
 Then, use these references with `ai.retrieve()` and `ai.index()`:

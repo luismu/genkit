@@ -92,6 +92,7 @@ export function postgres<EmbedderCustomOptions extends z.ZodTypeAny>(
     contentColumn?: string;
     embeddingColumn?: string;
     metadataColumns?: string[];
+    ignoreMetadataColumns?: string[];
     idColumn?: string;
     metadataJsonColumn?: string;
     distanceStrategy?: 'cosine' | 'ip' | 'l2';
@@ -169,9 +170,9 @@ export function configurePostgresIndexer<
     contentColumn?: string;
     embeddingColumn?: string;
     metadataColumns?: string[];
+    ignoreMetadataColumns?: string[];
     idColumn?: string;
     metadataJsonColumn?: string;
-    distanceStrategy?: 'cosine' | 'ip' | 'l2';
     embedder: EmbedderArgument<EmbedderCustomOptions>;
     embedderOptions?: z.infer<EmbedderCustomOptions>;
   }
@@ -180,31 +181,79 @@ export function configurePostgresIndexer<
     throw new Error('Engine is required');
   }
 
+  if (params.metadataColumns && params.ignoreMetadataColumns) {
+    throw new Error('Cannot use both metadataColumns and ignoreMetadataColumns');
+  }
+
   const {
     tableName,
     engine,
-    schemaName = 'public',
-    contentColumn = 'content',
-    embeddingColumn = 'embedding',
-    metadataColumns = [],
-    idColumn = 'id',
+    schemaName,
+    contentColumn,
+    embeddingColumn,
+    metadataColumns,
+    ignoreMetadataColumns,
+    idColumn,
     metadataJsonColumn,
-    distanceStrategy = 'cosine',
     embedder,
     embedderOptions
   } = params;
 
+  // Store the final metadata columns at the module level
+  let finalMetadataColumns: string[] = metadataColumns || [];
+
   async function ensureTableExists() {
-    await engine.initVectorstoreTable(tableName, 1536, {
-      schemaName,
-      contentColumn,
-      embeddingColumn,
-      metadataColumns: metadataColumns.map(col => new Column(col, 'TEXT')),
-      metadataJsonColumn,
-      idColumn,
-      overwriteExisting: false,
-      storeMetadata: true
-    });
+    // Get existing columns and their types if table exists
+    const { rows } = await engine.pool.raw(
+      `SELECT column_name, data_type, is_nullable 
+       FROM information_schema.columns 
+       WHERE table_name = '${tableName}' AND table_schema = '${schemaName || 'public'}'`
+    );
+    
+    if (rows.length === 0) {
+      throw new Error(`Table ${schemaName || 'public'}.${tableName} does not exist. Please create it using initVectorstoreTable first.`);
+    }
+
+    const existingColumns = rows.map(row => row.column_name);
+    const requiredColumns = [
+      idColumn || 'id',
+      contentColumn || 'content',
+      embeddingColumn || 'embedding'
+    ];
+
+    const missingColumns = requiredColumns.filter(col => !existingColumns.includes(col));
+    if (missingColumns.length > 0) {
+      throw new Error(`Missing required columns: ${missingColumns.join(', ')}`);
+    }
+
+    const columnTypes = rows.reduce((acc, row) => {
+      acc[row.column_name] = row.data_type;
+      return acc;
+    }, {} as Record<string, string>);
+
+    // Check content column is text type
+    if (columnTypes[contentColumn || 'content'] !== 'text') {
+      throw new Error(`Content column must be of type 'text', found '${columnTypes[contentColumn || 'content']}'`);
+    }
+
+    // Check embedding column is vector type
+    if (columnTypes[embeddingColumn || 'embedding'] !== 'USER-DEFINED') {
+      throw new Error(`Embedding column must be of type 'vector', found '${columnTypes[embeddingColumn || 'embedding']}'`);
+    }
+
+    // Check id column exists and is a string type
+    const idColumnType = columnTypes[idColumn || 'id'];
+    if (!idColumnType || !['text', 'character varying', 'varchar', 'uuid'].includes(idColumnType)) {
+      throw new Error(`ID column must be a string type (text, varchar, or uuid), found '${idColumnType}'`);
+    }
+
+    if (ignoreMetadataColumns && ignoreMetadataColumns.length > 0) {
+      finalMetadataColumns = existingColumns.filter(col => 
+        !ignoreMetadataColumns.includes(col) && 
+        !requiredColumns.includes(col) &&
+        col !== metadataJsonColumn
+      );
+    }
   }
 
   async function generateEmbeddings(documents: Document[], options?: { batchSize?: number }): Promise<IndexedDocument[]> {
@@ -212,13 +261,7 @@ export function configurePostgresIndexer<
     const results: IndexedDocument[] = [];
     
     for (let i = 0; i < documents.length; i += CHUNK_SIZE) {
-      const chunk = documents.slice(i, i + CHUNK_SIZE).map(doc => {
-        const textContent = doc.content
-          .filter(part => part.text)
-          .map(part => part.text)
-          .join(' ');
-        return Document.fromText(textContent, doc.metadata);
-      });
+      const chunk = documents.slice(i, i + CHUNK_SIZE);
       try {
         // Single batch call for all documents in the chunk
         const batchEmbeddings = await ai.embedMany({
@@ -228,7 +271,7 @@ export function configurePostgresIndexer<
         });
         
         const chunkResults = chunk.map((doc, index) => ({
-          id: doc.metadata?.[idColumn] as string || uuidv4(),
+          id: doc.metadata?.[idColumn || 'id'] as string || uuidv4(),
           content: typeof doc.content === 'string' ? doc.content : JSON.stringify(doc.content),
           embedding: JSON.stringify(batchEmbeddings[index].embedding),
           metadata: doc.metadata || {}
@@ -261,12 +304,12 @@ export function configurePostgresIndexer<
           const insertData = batch.map(doc => {
             const metadata = doc.metadata || {};
             return {
-              [idColumn]: doc.id,
-              [contentColumn]: doc.content,
-              [embeddingColumn]: doc.embedding,
+              [idColumn || 'id']: doc.id,
+              [contentColumn || 'content']: doc.content,
+              [embeddingColumn || 'embedding']: doc.embedding,
               ...(metadataJsonColumn && { [metadataJsonColumn]: metadata }),
               ...Object.fromEntries(
-                metadataColumns
+                finalMetadataColumns
                   .filter(col => metadata[col] !== undefined)
                   .map(col => [col, metadata[col]])
               )
