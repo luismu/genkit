@@ -10,22 +10,19 @@ npm i --save @genkitx-cloud-sql-pg
 
 ## Configuration
 
-To use this plugin, first create a PostgresEngine instance:
+To use this plugin, first create a `PostgresEngine` instance:
 
 ```ts
 import { PostgresEngine } from '@genkit-ai/cloud-sql-pg';
 
 // Create PostgresEngine instance
-const engine = await PostgresEngine.fromEngineArgs({
-  user: 'postgres',
-  password: 'password',
-  host: 'localhost',
-  database: 'mydb',
-  port: 5432
-});
+const engine = await PostgresEngine.fromInstance('my-project', 'us-central1', 'my-instance', 'my-database');
 
 // Create the vector store table
-await engine.initVectorstoreTable('my-documents', 1536, {
+await engine.initVectorstoreTable('my-documents', 768);
+
+// Or create a custom vector store table
+await engine.initVectorstoreTable('my-documents', 768, {
   schemaName: 'public',
   contentColumn: 'content',
   embeddingColumn: 'embedding',
@@ -54,13 +51,13 @@ const ai = genkit({
         tableName: 'my-documents',
         engine: engine,
         embedder: textEmbedding004,
-        schemaName: 'public', 
-        contentColumn: 'content',
-        embeddingColumn: 'embedding',
-        idColumn: 'custom_id', // Match the ID column from table creation
-        metadataColumns: ['source', 'category'],
-        ignoreMetadataColumns: ['created_at', 'updated_at'],
-        metadataJsonColumn: 'metadata',
+        // Use additional fields to connect to a custom vector store table
+        // schemaName: 'public', 
+        // contentColumn: 'custom_content',
+        // embeddingColumn: 'custom_embedding',
+        // idColumn: 'custom_id', // Match the ID column from table creation
+        // metadataColumns: ['source', 'category'],
+        // metadataJsonColumn: 'my_json_metadata',
       },
     ]),
   ],
@@ -68,10 +65,7 @@ const ai = genkit({
 
 // To use the table you configured when you loaded the plugin:
 await ai.index({ 
-  indexer: postgresIndexerRef({ 
-    tableName: 'my-documents',
-    engine: engine
-  }), 
+  indexer: postgresIndexerRef, 
   documents: [
     {
       content: [{ text: "The product features include..." }],
@@ -87,10 +81,7 @@ await ai.index({
 // To retrieve from the configured table:
 const query = "What are the key features of the product?";
 let docs = await ai.retrieve({ 
-  retriever: postgresRetrieverRef({ 
-    tableName: 'my-documents',
-    engine: engine
-  }), 
+  retriever: postgresRetrieverRef, 
   query,
   options: {
     k: 5,
@@ -101,14 +92,6 @@ let docs = await ai.retrieve({
   }
 });
 ```
-
-The plugin validates the following when initializing:
-- Required columns exist (id, content, embedding)
-- Content column is a text type
-- Embedding column is a vector type
-- Metadata columns exist (if specified)
-- Cannot use both metadataColumns and ignoreMetadataColumns
-- If ignoreMetadataColumns is used, it will use all remaining columns as metadata
 
 ## Usage
 
@@ -124,8 +107,9 @@ You can create reusable references for your indexers:
 
 ```ts
 export const myDocumentsIndexer = postgresIndexerRef({
-  tableName: 'my-documents',
-  engine: engine
+  tableName: 'my-custom-documents',
+  idColumn: 'custom_id',
+  metadataColumns: ['source', 'category']
 });
 ```
 
@@ -171,7 +155,8 @@ Create reusable references for your retrievers:
 ```ts
 export const myDocumentsRetriever = postgresRetrieverRef({
   tableName: 'my-documents',
-  engine: engine
+  idColumn: 'custom_id',
+  metadataColumns: ['source', 'category']
 });
 ```
 
@@ -184,26 +169,7 @@ let docs = await ai.retrieve({
   query,
   options: {
     k: 5, // Number of documents to return
-    filter: { // Optional filter on metadata columns
-      category: 'product-docs',
-      source: 'website'
-    }
-  }
-});
-
-// Or use the reference inline:
-docs = await ai.retrieve({ 
-  retriever: postgresRetrieverRef({ 
-    tableName: 'my-documents',
-    engine: engine
-  }), 
-  query,
-  options: {
-    k: 5,
-    filter: {
-      category: 'product-docs',
-      source: 'website'
-    }
+    filter: "source = 'website'" // Optional filter on metadata columns
   }
 });
 ```
