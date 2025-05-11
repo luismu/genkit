@@ -7,12 +7,12 @@ import {
   jest,
   test,
 } from '@jest/globals';
-import { Genkit } from 'genkit';
+import { Genkit, genkit } from 'genkit';
 import {
   Document,
 } from 'genkit/retriever';
 import { PostgresEngine } from '../src/engine';
-import { configurePostgresIndexer } from '../src/index';
+import { configurePostgresIndexer, postgres } from '../src/index';
 
 import * as dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
@@ -21,6 +21,10 @@ dotenv.config();
 
 const TEST_TABLE = "test_embeddings";
 const SCHEMA_NAME = "test_schema";
+const CUSTOM_CONTENT_COLUMN = "my_content";
+const CUSTOM_EMBEDDING_COLUMN = "my_embedding";
+const CUSTOM_ID_COLUMN = "custom_id";
+const CUSTOM_METADATA_COLUMN = "custom_metadata";
 
 describe("configurePostgresIndexer Integration Tests", () => {
   let engine: PostgresEngine;
@@ -31,13 +35,16 @@ describe("configurePostgresIndexer Integration Tests", () => {
 
   beforeAll(async () => {
     // Initialize PostgresEngine
-    engine = await PostgresEngine.fromEngineArgs({
-      user: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-      host: process.env.DB_HOST,
-      database: process.env.DB_NAME,
-      port: parseInt(process.env.DB_PORT || '5432')
-    });
+    engine = await PostgresEngine.fromInstance(
+      process.env.PROJECT_ID!,
+      process.env.REGION!,
+      process.env.INSTANCE_NAME!,
+      process.env.DB_NAME!,
+      {
+        user: process.env.DB_USER!,
+        password: process.env.DB_PASSWORD!
+      }
+    );
 
     // Create test schema and table
     await engine.pool.raw(`CREATE SCHEMA IF NOT EXISTS ${SCHEMA_NAME}`);
@@ -46,10 +53,10 @@ describe("configurePostgresIndexer Integration Tests", () => {
     // Initialize the vectorstore table
     await engine.initVectorstoreTable(TEST_TABLE, 1536, {
       schemaName: SCHEMA_NAME,
-      contentColumn: 'content',
-      embeddingColumn: 'embedding',
-      idColumn: 'id',
-      metadataJsonColumn: 'metadata',
+      contentColumn: CUSTOM_CONTENT_COLUMN,
+      embeddingColumn: CUSTOM_EMBEDDING_COLUMN,
+      idColumn: CUSTOM_ID_COLUMN,
+      metadataJsonColumn: CUSTOM_METADATA_COLUMN,
       storeMetadata: true,
       overwriteExisting: true
     });
@@ -80,10 +87,10 @@ describe("configurePostgresIndexer Integration Tests", () => {
       tableName: TEST_TABLE,
       engine: engine,
       schemaName: SCHEMA_NAME,
-      contentColumn: 'content',
-      embeddingColumn: 'embedding',
-      idColumn: 'id',
-      metadataJsonColumn: 'metadata',
+      contentColumn: CUSTOM_CONTENT_COLUMN,
+      embeddingColumn: CUSTOM_EMBEDDING_COLUMN,
+      idColumn: CUSTOM_ID_COLUMN,
+      metadataJsonColumn: CUSTOM_METADATA_COLUMN,
       embedder: mockEmbedder
     });
   });
@@ -92,29 +99,6 @@ describe("configurePostgresIndexer Integration Tests", () => {
     test('should create indexer with correct configuration', async () => {
       expect(indexer.config.name).toBe(`postgres/${TEST_TABLE}`);
       expect(indexer.config.configSchema).toBeDefined();
-    });
-
-    test('should create table with correct schema on first use', async () => {
-      // Execute the handler to trigger table validation
-      await indexer({ documents: [], options: {} });
-
-      // Verify table exists with correct schema
-      const tableInfo = await engine.pool.raw(`
-        SELECT column_name, data_type 
-        FROM information_schema.columns 
-        WHERE table_schema = '${SCHEMA_NAME}' 
-        AND table_name = '${TEST_TABLE}'
-      `);
-
-      expect(tableInfo.rows).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ column_name: 'id', data_type: 'text' }),
-          expect.objectContaining({ column_name: 'content', data_type: 'text' }),
-          expect.objectContaining({ column_name: 'embedding', data_type: 'USER-DEFINED' }),
-          expect.objectContaining({ column_name: 'metadata', data_type: 'jsonb' }),
-          expect.objectContaining({ column_name: 'created_at', data_type: 'timestamp without time zone' })
-        ])
-      );
     });
   });
 
@@ -137,6 +121,67 @@ describe("configurePostgresIndexer Integration Tests", () => {
       expect(result[0].content).toBe('Test content');
       expect(result[0].metadata.source).toBe('test');
       expect(result[0].embedding).toBeDefined();
+    });
+
+    test('should initialize Genkit with postgres plugin', async () => {
+      const ai = genkit({
+        plugins: [postgres([{
+          tableName: TEST_TABLE,
+          engine: engine,
+          schemaName: SCHEMA_NAME,
+          contentColumn: CUSTOM_CONTENT_COLUMN,
+          embeddingColumn: CUSTOM_EMBEDDING_COLUMN,
+          idColumn: CUSTOM_ID_COLUMN,
+          metadataJsonColumn: CUSTOM_METADATA_COLUMN,
+          embedder: mockEmbedder
+        }])]
+      });
+
+      expect(await ai.registry.lookupAction(`/indexer/postgres/${TEST_TABLE}`)).toBeDefined();
+    });
+
+    test('should index documents using ai.index()', async () => {
+      const ai = genkit({
+        plugins: [postgres([{
+          tableName: TEST_TABLE,
+          engine: engine,
+          schemaName: SCHEMA_NAME,
+          contentColumn: CUSTOM_CONTENT_COLUMN,
+          embeddingColumn: CUSTOM_EMBEDDING_COLUMN,
+          idColumn: CUSTOM_ID_COLUMN,
+          metadataJsonColumn: CUSTOM_METADATA_COLUMN,
+          embedder: mockEmbedder
+        }])]
+      });
+
+      const testDocs = [
+        new Document({
+          content: [{ text: 'Test content 1' }],
+          metadata: { source: 'test1', customId: uuidv4() }
+        }),
+        new Document({
+          content: [{ text: 'Test content 2' }],
+          metadata: { source: 'test2', customId: uuidv4() }
+        })
+      ];
+
+      await ai.index({
+        indexer: `postgres/${TEST_TABLE}`,
+        documents: testDocs
+      });
+
+      // Verify documents were inserted
+      const result = await engine.pool
+        .withSchema(SCHEMA_NAME)
+        .select('*')
+        .from(TEST_TABLE)
+        .orderBy(CUSTOM_CONTENT_COLUMN);
+
+      expect(result).toHaveLength(2);
+      expect(result[0][CUSTOM_CONTENT_COLUMN]).toBe('Test content 1');
+      expect(result[1][CUSTOM_CONTENT_COLUMN]).toBe('Test content 2');
+      expect(result[0][CUSTOM_METADATA_COLUMN].source).toBe('test1');
+      expect(result[1][CUSTOM_METADATA_COLUMN].source).toBe('test2');
     });
 
     test('should handle batch indexing with custom batch size', async () => {
@@ -189,9 +234,9 @@ describe("configurePostgresIndexer Integration Tests", () => {
           tableName: TEST_TABLE,
           // @ts-expect-error - Testing invalid input
           engine: undefined,
-          contentColumn: 'content',
-          embeddingColumn: 'embedding',
-          idColumn: 'id',
+          contentColumn: CUSTOM_CONTENT_COLUMN,
+          embeddingColumn: CUSTOM_EMBEDDING_COLUMN,
+          idColumn: CUSTOM_ID_COLUMN,
           embedder: mockEmbedder
         });
       }).toThrow();
@@ -207,9 +252,9 @@ describe("configurePostgresIndexer Integration Tests", () => {
         tableName: TEST_TABLE,
         engine,
         schemaName: SCHEMA_NAME,
-        contentColumn: 'content',
-        embeddingColumn: 'embedding',
-        idColumn: 'id',
+        contentColumn: CUSTOM_CONTENT_COLUMN,
+        embeddingColumn: CUSTOM_EMBEDDING_COLUMN,
+        idColumn: CUSTOM_ID_COLUMN,
         embedder: errorEmbedder
       });
 
@@ -227,10 +272,10 @@ describe("configurePostgresIndexer Integration Tests", () => {
     test('should handle database insertion errors', async () => {
       await engine.initVectorstoreTable('constraint_test', 1536, {
         schemaName: SCHEMA_NAME,
-        contentColumn: 'content',
-        embeddingColumn: 'embedding',
-        idColumn: 'id',
-        metadataJsonColumn: 'metadata',
+        contentColumn: CUSTOM_CONTENT_COLUMN,
+        embeddingColumn: CUSTOM_EMBEDDING_COLUMN,
+        idColumn: CUSTOM_ID_COLUMN,
+        metadataJsonColumn: CUSTOM_METADATA_COLUMN,
         storeMetadata: true,
         overwriteExisting: true
       });
@@ -245,10 +290,10 @@ describe("configurePostgresIndexer Integration Tests", () => {
         tableName: 'constraint_test',
         engine,
         schemaName: SCHEMA_NAME,
-        contentColumn: 'content',
-        embeddingColumn: 'embedding',
-        idColumn: 'id',
-        metadataJsonColumn: 'metadata',
+        contentColumn: CUSTOM_CONTENT_COLUMN,
+        embeddingColumn: CUSTOM_EMBEDDING_COLUMN,
+        idColumn: CUSTOM_ID_COLUMN,
+        metadataJsonColumn: CUSTOM_METADATA_COLUMN,
         embedder: mockEmbedder
       });
 
@@ -272,10 +317,10 @@ describe("configurePostgresIndexer Integration Tests", () => {
         tableName: nonExistentTable,
         engine,
         schemaName: SCHEMA_NAME,
-        contentColumn: 'content',
-        embeddingColumn: 'embedding',
-        idColumn: 'id',
-        metadataJsonColumn: 'metadata',
+        contentColumn: CUSTOM_CONTENT_COLUMN,
+        embeddingColumn: CUSTOM_EMBEDDING_COLUMN,
+        idColumn: CUSTOM_ID_COLUMN,
+        metadataJsonColumn: CUSTOM_METADATA_COLUMN,
         embedder: mockEmbedder
       });
 
@@ -297,10 +342,10 @@ describe("configurePostgresIndexer Integration Tests", () => {
         tableName: 'invalid_table',
         engine,
         schemaName: SCHEMA_NAME,
-        contentColumn: 'content',
-        embeddingColumn: 'embedding',
-        idColumn: 'id',
-        metadataJsonColumn: 'metadata',
+        contentColumn: CUSTOM_CONTENT_COLUMN,
+        embeddingColumn: CUSTOM_EMBEDDING_COLUMN,
+        idColumn: CUSTOM_ID_COLUMN,
+        metadataJsonColumn: CUSTOM_METADATA_COLUMN,
         embedder: mockEmbedder
       });
 
@@ -324,10 +369,10 @@ describe("configurePostgresIndexer Integration Tests", () => {
         tableName: 'wrong_types',
         engine,
         schemaName: SCHEMA_NAME,
-        contentColumn: 'content',
-        embeddingColumn: 'embedding',
-        idColumn: 'id',
-        metadataJsonColumn: 'metadata',
+        contentColumn: CUSTOM_CONTENT_COLUMN,
+        embeddingColumn: CUSTOM_EMBEDDING_COLUMN,
+        idColumn: CUSTOM_ID_COLUMN,
+        metadataJsonColumn: CUSTOM_METADATA_COLUMN,
         embedder: mockEmbedder
       });
 

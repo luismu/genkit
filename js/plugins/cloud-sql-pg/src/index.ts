@@ -95,7 +95,6 @@ export function postgres<EmbedderCustomOptions extends z.ZodTypeAny>(
     ignoreMetadataColumns?: string[];
     idColumn?: string;
     metadataJsonColumn?: string;
-    distanceStrategy?: 'cosine' | 'ip' | 'l2';
   }[]
 ): GenkitPlugin {
   return genkitPlugin('postgres', async (ai: Genkit) => {
@@ -152,7 +151,6 @@ export function configurePostgresRetriever<
  * @param params.metadataColumns The metadata columns to use for the indexer
  * @param params.idColumn The id column to use for the indexer
  * @param params.metadataJsonColumn The metadata json column to use for the indexer
- * @param params.distanceStrategy The distance strategy to use for the indexer
  * @param params.contentColumn The content column to use for the indexer
  * @param params.embeddingColumn The embedding column to use for the indexer
  * @param params.schemaName The schema name to use for the indexer
@@ -199,6 +197,12 @@ export function configurePostgresIndexer<
     embedderOptions
   } = params;
 
+  const defaultSchemaName = schemaName ?? 'public';
+  const defaultContentColumn = contentColumn ?? 'content';
+  const defaultEmbeddingColumn = embeddingColumn ?? 'embedding';
+  const defaultIdColumn = idColumn ?? 'id';
+  const defaultMetadataJsonColumn = metadataJsonColumn ?? 'metadata';
+
   // Store the final metadata columns at the module level
   let finalMetadataColumns: string[] = metadataColumns || [];
 
@@ -207,18 +211,18 @@ export function configurePostgresIndexer<
     const { rows } = await engine.pool.raw(
       `SELECT column_name, data_type, is_nullable 
        FROM information_schema.columns 
-       WHERE table_name = '${tableName}' AND table_schema = '${schemaName || 'public'}'`
+       WHERE table_name = '${tableName}' AND table_schema = '${defaultSchemaName}'`
     );
     
     if (rows.length === 0) {
-      throw new Error(`Table ${schemaName || 'public'}.${tableName} does not exist. Please create it using initVectorstoreTable first.`);
+      throw new Error(`Table ${defaultSchemaName}.${tableName} does not exist. Please create it using initVectorstoreTable first.`);
     }
 
     const existingColumns = rows.map(row => row.column_name);
     const requiredColumns = [
-      idColumn || 'id',
-      contentColumn || 'content',
-      embeddingColumn || 'embedding'
+      defaultIdColumn,
+      defaultContentColumn,
+      defaultEmbeddingColumn
     ];
 
     const missingColumns = requiredColumns.filter(col => !existingColumns.includes(col));
@@ -231,18 +235,17 @@ export function configurePostgresIndexer<
       return acc;
     }, {} as Record<string, string>);
 
-    // Check content column is text type
-    if (columnTypes[contentColumn || 'content'] !== 'text') {
-      throw new Error(`Content column must be of type 'text', found '${columnTypes[contentColumn || 'content']}'`);
+
+    if (columnTypes[defaultContentColumn] !== 'text') {
+      throw new Error(`Content column must be of type 'text', found '${columnTypes[defaultContentColumn]}'`);
     }
 
-    // Check embedding column is vector type
-    if (columnTypes[embeddingColumn || 'embedding'] !== 'USER-DEFINED') {
-      throw new Error(`Embedding column must be of type 'vector', found '${columnTypes[embeddingColumn || 'embedding']}'`);
+
+    if (columnTypes[defaultEmbeddingColumn] !== 'USER-DEFINED') {
+      throw new Error(`Embedding column must be of type 'vector', found '${columnTypes[defaultEmbeddingColumn]}'`);
     }
 
-    // Check id column exists and is a string type
-    const idColumnType = columnTypes[idColumn || 'id'];
+    const idColumnType = columnTypes[defaultIdColumn];
     if (!idColumnType || !['text', 'character varying', 'varchar', 'uuid'].includes(idColumnType)) {
       throw new Error(`ID column must be a string type (text, varchar, or uuid), found '${idColumnType}'`);
     }
@@ -251,7 +254,7 @@ export function configurePostgresIndexer<
       finalMetadataColumns = existingColumns.filter(col => 
         !ignoreMetadataColumns.includes(col) && 
         !requiredColumns.includes(col) &&
-        col !== metadataJsonColumn
+        col !== defaultMetadataJsonColumn
       );
     }
   }
@@ -271,7 +274,7 @@ export function configurePostgresIndexer<
         });
         
         const chunkResults = chunk.map((doc, index) => ({
-          id: doc.metadata?.[idColumn || 'id'] as string || uuidv4(),
+          id: doc.metadata?.[defaultIdColumn] as string || uuidv4(),
           content: typeof doc.content === 'string' ? doc.content : JSON.stringify(doc.content),
           embedding: JSON.stringify(batchEmbeddings[index].embedding),
           metadata: doc.metadata || {}
@@ -304,10 +307,10 @@ export function configurePostgresIndexer<
           const insertData = batch.map(doc => {
             const metadata = doc.metadata || {};
             return {
-              [idColumn || 'id']: doc.id,
-              [contentColumn || 'content']: doc.content,
-              [embeddingColumn || 'embedding']: doc.embedding,
-              ...(metadataJsonColumn && { [metadataJsonColumn]: metadata }),
+              [defaultIdColumn]: doc.id,
+              [defaultContentColumn]: doc.content,
+              [defaultEmbeddingColumn]: doc.embedding,
+              ...(defaultMetadataJsonColumn && { [defaultMetadataJsonColumn]: metadata }),
               ...Object.fromEntries(
                 finalMetadataColumns
                   .filter(col => metadata[col] !== undefined)
@@ -316,8 +319,8 @@ export function configurePostgresIndexer<
             };
           });
 
-          const table = schemaName 
-            ? engine.pool.withSchema(schemaName).table(tableName)
+          const table = defaultSchemaName 
+            ? engine.pool.withSchema(defaultSchemaName).table(tableName)
             : engine.pool.table(tableName);
 
           await table.insert(insertData);

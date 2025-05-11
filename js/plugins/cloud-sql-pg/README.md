@@ -23,14 +23,15 @@ const ai = genkit({
     postgres([
       {
         tableName: 'my-documents',
-        engine: {
-          user: 'postgres',
-          password: 'password',
-          host: 'localhost',
-          database: 'mydb',
-          port: 5432
-        },
+        engine: engine,
         embedder: textEmbedding004,
+        schemaName: 'public', 
+        contentColumn: 'content',
+        embeddingColumn: 'embedding',
+        idColumn: 'custom_id',
+        metadataColumns: ['source', 'category'],
+        ignoreMetadataColumns: ['created_at', 'updated_at'],
+        metadataJsonColumn: 'metadata',
       },
     ]),
   ],

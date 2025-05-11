@@ -159,7 +159,7 @@ describe("PostgresEngine Instance creation", () => {
   });
 
   test('should create a PostgresEngine Instance through from_engine_args using a URL', async () => {
-    const url = `postgresql+asyncpg://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.HOST}:5432/${process.env.DB_NAME}`
+    const url = `postgresql+asyncpg://${process.env.DB_USER}:${process.env.DB_PASSWORD}@${process.env.IP_ADDRESS}:5432/${process.env.DB_NAME}`
 
     PEInstance = await PostgresEngine.fromEngineArgs(url, poolConfig);
 
