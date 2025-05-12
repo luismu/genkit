@@ -80,8 +80,8 @@ describe("PostgresEngine Instance creation", () => {
       pgArgs
     );
 
-    const {rows} = await PEInstance.testConnection();
-    const currentTimestamp = rows[0].currenttimestamp;
+    const result = await PEInstance.testConnection();
+    const currentTimestamp = result[0].currentTimestamp;
     expect(currentTimestamp).toBeDefined();
 
     try {
@@ -105,8 +105,8 @@ describe("PostgresEngine Instance creation", () => {
       pgArgs
     );
     
-    const {rows} = await PEInstance.testConnection();
-    const currentTimestamp = rows[0].currenttimestamp;
+    const result = await PEInstance.testConnection();
+    const currentTimestamp = result[0].currentTimestamp;
     expect(currentTimestamp).toBeDefined();
 
     try {
@@ -137,8 +137,8 @@ describe("PostgresEngine Instance creation", () => {
     const engine = knex(dbConfig)
     PEInstance = await PostgresEngine.fromEngine(engine)
 
-    const {rows} = await PEInstance.testConnection();
-    const currentTimestamp = rows[0].currenttimestamp;
+    const result = await PEInstance.testConnection();
+    const currentTimestamp = result[0].currentTimestamp;
     expect(currentTimestamp).toBeDefined();
 
     try {
@@ -163,8 +163,8 @@ describe("PostgresEngine Instance creation", () => {
 
     PEInstance = await PostgresEngine.fromEngineArgs(url, poolConfig);
 
-    const {rows} = await PEInstance.testConnection();
-    const currentTimestamp = rows[0].currenttimestamp;
+    const result = await PEInstance.testConnection();
+    const currentTimestamp = result[0].currentTimestamp;
     expect(currentTimestamp).toBeDefined();
 
     try {
