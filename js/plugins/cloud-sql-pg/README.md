@@ -13,13 +13,16 @@ npm i --save @genkit-ai/cloud-sql-pg
 import { PostgresEngine } from '@genkit-ai/cloud-sql-pg';
 
 // Initialize the engine
-const engine = new PostgresEngine({
-  host: 'localhost',
-  user: 'postgres',
-  password: 'your-password',
-  database: 'mydb',
-  port: 5432
-});
+const engine = await PostgresEngine.fromInstance(
+  'your-project-id',
+  'your-region',
+  'your-instance-name',
+  'your-database-name',
+  {
+    user: 'your-username',
+    password: 'your-password'
+  }
+);
 ```
 
 ### Indexer usage
