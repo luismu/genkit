@@ -13,7 +13,7 @@ npm i --save @genkitx-cloud-sql-pg
 To use this plugin, first create a `PostgresEngine` instance:
 
 ```ts
-import { PostgresEngine } from '@genkitx-cloud-sql-pg';
+import { PostgresEngine } from 'genkitx-cloud-sql-pg';;
 
 // Create PostgresEngine instance
 const engine = await PostgresEngine.fromInstance('my-project', 'us-central1', 'my-instance', 'my-database');
@@ -37,13 +37,12 @@ await engine.initVectorstoreTable('my-documents', 768, {
 });
 ```
 
-
 Then, specify the plugin when you initialize Genkit:
 
 ```ts
 import { genkit } from 'genkit';
 import { postgres } from 'genkitx-cloud-sql-pg';
-import { textEmbedding004 } from '@genkit/vertexai';
+import { textEmbedding004 } from '@genkit-ai/vertexai';
 
 const ai = genkit({
   plugins: [
@@ -63,6 +62,35 @@ const ai = genkit({
     ]),
   ],
 });
+
+// To use the table you configured when you loaded the plugin:
+await ai.index({ 
+  indexer: postgresIndexerRef, 
+  documents: [
+    {
+      content: [{ text: "The product features include..." }],
+      metadata: {
+        source: "website",
+        category: "product-docs",
+        custom_id: "doc-123" // This will be used as the document ID
+      }
+    }
+  ]
+});
+
+// To retrieve from the configured table:
+const query = "What are the key features of the product?";
+let docs = await ai.retrieve({ 
+  retriever: postgresRetrieverRef, 
+  query,
+  options: {
+    k: 5,
+    filter: {
+      category: 'product-docs',
+      source: 'website'
+    }
+  }
+});
 ```
 
 ## Usage
@@ -70,9 +98,8 @@ const ai = genkit({
 Import retriever and indexer references like so:
 
 ```ts
-import { postgresRetrieverRef, postgresIndexerRef } from 'genkitx-cloud-sql-pg';
+import { postgresRetrieverRef, postgresIndexerRef } from '@genkit-ai/cloud-sql-pg';
 ```
-
 
 ### Index Documents
 
@@ -85,7 +112,6 @@ export const myDocumentsIndexer = postgresIndexerRef({
   metadataColumns: ['source', 'category']
 });
 ```
-
 
 Then use them to index documents:
 
