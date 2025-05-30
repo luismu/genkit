@@ -4,15 +4,15 @@ The Cloud SQL for PostgreSQL plugin provides indexer and retriever implementatio
 
 ## Installation
 
-posix-terminal
+```posix-terminal
 npm i --save @genkitx-cloud-sql-pg
-
+```
 
 ## Configuration
 
-To use this plugin, first create a PostgresEngine instance:
+To use this plugin, first create a `PostgresEngine` instance:
 
-```typescript
+```ts
 import { PostgresEngine } from '@genkit-ai/cloud-sql-pg';
 
 // Create PostgresEngine instance
@@ -40,7 +40,7 @@ await engine.initVectorstoreTable('my-documents', 768, {
 
 Then, specify the plugin when you initialize Genkit:
 
-```typescript
+```ts
 import { genkit } from 'genkit';
 import { postgres } from '@genkit-ai/cloud-sql-pg';
 import { textEmbedding004 } from '@genkit-ai/vertexai';
@@ -69,7 +69,7 @@ const ai = genkit({
 
 Import retriever and indexer references like so:
 
-```typescript
+```ts
 import { postgresRetrieverRef, postgresIndexerRef } from '@genkit-ai/cloud-sql-pg';
 ```
 
@@ -78,7 +78,7 @@ import { postgresRetrieverRef, postgresIndexerRef } from '@genkit-ai/cloud-sql-p
 
 You can create reusable references for your indexers:
 
-```typescript
+```ts
 export const myDocumentsIndexer = postgresIndexerRef({
   tableName: 'my-custom-documents',
   idColumn: 'custom_id',
@@ -89,7 +89,7 @@ export const myDocumentsIndexer = postgresIndexerRef({
 
 Then use them to index documents:
 
-```typescript
+```ts
 // Index with custom ID from metadata
 const docWithCustomId = new Document({
   content: [{ text: 'Document with custom ID' }],
@@ -127,7 +127,7 @@ await ai.index({
 
 You can create reusable references for your retrievers:
 
-```typescript
+```ts
 export const myDocumentsRetriever = postgresRetrieverRef({
   tableName: 'my-documents',
   idColumn: 'custom_id',
@@ -138,7 +138,7 @@ export const myDocumentsRetriever = postgresRetrieverRef({
 
 Then use them to retrieve documents:
 
-```typescript
+```ts
 // Basic retrieval
 const query = "What are the key features of the product?";
 let docs = await ai.retrieve({ 
@@ -168,7 +168,7 @@ filter: SQL WHERE clause to filter results (e.g., "category = 'docs' AND source 
 
 The retriever supports different distance strategies for vector similarity search:
 
-```typescript
+```ts
 import { DistanceStrategy } from '@genkit-ai/cloud-sql-pg';
 
 // Configure retriever with specific distance strategy
@@ -188,7 +188,7 @@ Available strategies:
 
 The retriever preserves all metadata fields when returning documents. You can access both individual metadata columns and the JSON metadata column:
 
-```typescript
+```ts
 // Example 1: Search for product documentation
 const productQuery = "How do I configure the API rate limits?";
 const productDocs = await ai.retrieve({ 
