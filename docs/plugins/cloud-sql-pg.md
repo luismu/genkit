@@ -42,8 +42,8 @@ Then, specify the plugin when you initialize Genkit:
 
 ```ts
 import { genkit } from 'genkit';
-import { postgres } from '@genkit-ai/cloud-sql-pg';
-import { textEmbedding004 } from '@genkit-ai/vertexai';
+import { postgres } from 'genkitx-cloud-sql-pg';
+import { textEmbedding004 } from '@genkit/vertexai';
 
 const ai = genkit({
   plugins: [
@@ -70,7 +70,7 @@ const ai = genkit({
 Import retriever and indexer references like so:
 
 ```ts
-import { postgresRetrieverRef, postgresIndexerRef } from '@genkit-ai/cloud-sql-pg';
+import { postgresRetrieverRef, postgresIndexerRef } from 'genkitx-cloud-sql-pg';
 ```
 
 
@@ -169,7 +169,7 @@ filter: SQL WHERE clause to filter results (e.g., "category = 'docs' AND source 
 The retriever supports different distance strategies for vector similarity search:
 
 ```ts
-import { DistanceStrategy } from '@genkit-ai/cloud-sql-pg';
+import { DistanceStrategy } from 'genkitx-cloud-sql-pg';
 
 // Configure retriever with specific distance strategy
 const myDocumentsRetriever = postgresRetrieverRef({
